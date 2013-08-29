@@ -11,6 +11,12 @@
 	at/2,
 	fold/3
 ]).
+-export([
+	new/0,
+	include/2,
+	exclude/2,
+	project/2
+]).
 
 -export([
 	update/3,
@@ -125,6 +131,46 @@ fold(Fun, Acc, [{Label, Value} | Rest]) ->
 	fold(Fun, Fun(Label, Value, Acc), Rest);
 fold(Fun, Acc, Document) when is_function(Fun, 3), Document =:= []; Document =:= [{}] ->
 	Acc.
+
+-spec new() -> document().
+new() ->
+	[{}].
+
+-spec include([label()], document()) -> document().
+include(Labels0, Document) ->
+	Labels = [existing_atom(Label) || Label <- Labels0],
+	fold(fun(Label, Value, Acc) ->
+		case lists:member(Label, Labels) of
+			true -> bson:update(Label, Value, Acc);
+			false -> Acc
+		end
+	end, bson:new(), Document).
+
+-spec exclude([label()], document()) -> document().
+exclude(Labels0, Document) ->
+	Labels = [existing_atom(Label) || Label <- Labels0],
+	fold(fun(Label, Value, Acc) ->
+		case lists:member(Label, Labels) of
+			false -> bson:update(Label, Value, Acc);
+			true -> Acc
+		end
+	end, bson:new(), Document).
+
+-spec project(undefined | document(), document()) -> document().
+project(undefined, Document) ->
+	Document;
+project([{}], _Document) ->
+	[{}];
+project(Projector, Document) ->
+	Fields = fold(fun
+		(Label, 0, Acc) when Label =:= '_id'; Label =:= <<"_id">> ->
+			lists:delete('_id', Acc);
+		(Label, 1, Acc) ->
+			[Label | Acc];
+		(_, 0, Acc) ->
+			Acc
+	end, ['_id'], Projector),
+	include(Fields, Document).
 
 -spec update(lookup_path(), value(), document()) -> document().
 % TODO: support full paths when updating
@@ -347,12 +393,14 @@ lookup_i(Label, [_ | Rest]) ->
 	lookup_i(Label, Rest).
 
 %% @private
-existing_atom(Binary) ->
+existing_atom(Binary) when is_binary(Binary) ->
 	try binary_to_existing_atom(Binary, utf8) of
 		L -> L
 	catch
 		error:badarg -> Binary
-	end.
+	end;
+existing_atom(Atom) when is_atom(Atom) ->
+	Atom.
 
 -ifdef(TEST).
 
@@ -390,6 +438,32 @@ fold_test_() ->
 	],
 	[fun() -> Result = fold(Fun, Acc, Doc) end || {Fun, Acc, Doc, Result} <- Tests].
 
+include_test_() ->
+	Tests = [
+		{[a], [{a, -4.230845}]},
+		{[], [{}]},
+		{[z], [{}]},
+		{[a, z], [{a, -4.230845}]}
+	],
+	[fun() -> Result = include(Labels, test_document()) end || {Labels, Result} <- Tests].
+
+exclude_test_() ->
+	Doc = test_document(),
+	Tests = [
+		{[b, c, d1, d2, e, f, g, h, i, j, k1, k2, l, m, n, o1, o2, p, q1, q2, r, s1, s2], [{a, -4.230845}]},
+		{[], lists:reverse(Doc)}
+	],
+	[fun() -> Result = exclude(Labels, Doc) end || {Labels, Result} <- Tests].
+
+project_test_() ->
+	Tests = [
+		{[{a, 1}], [{a, -4.230845}]},
+		{[], [{}]},
+		{[{z, 1}], [{}]},
+		{[{a, 1}, {z, 1}], [{a, -4.230845}]}
+	],
+	[fun() -> Result = project(Projector, test_document()) end || {Projector, Result} <- Tests].
+
 update_test_() ->
 	Tests = [
 		{{a, 1}, [{}], [{a, 1}]},
@@ -410,7 +484,7 @@ test_document() ->
 		{c, [{x, -1}, {y, 2.2001}]},
 		{d1, [23, 45, 200]},
 		{d2, []},
-		{eeeeeeeee, {data, binary, Data}},
+		{e, {data, binary, Data}},
 		{f, {data, function, Data}},
 		{g, {data, uuid, Data}},
 		{h, {data, md5, Data}},
