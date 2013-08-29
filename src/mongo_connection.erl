@@ -5,11 +5,11 @@
 ]).
 
 -export([
-	update/6,
-	insert/5,
-	'query'/8,
+	update/7,
+	insert/6,
+	'query'/9,
 	get_more/6,
-	delete/5,
+	delete/6,
 	kill_cursors/3
 ]).
 
@@ -29,6 +29,9 @@
 	database/0,
 	collection/0,
 
+	read_mode/0,
+	write_mode/0,
+
 	read_error/0,
 	write_error/0,
 
@@ -42,7 +45,7 @@
 
 -record(state, {
 	transport    :: gen_tcp | ssl,
-	socket       :: gen_tcp:socket() | ssl:socket(),
+	socket       :: port() | ssl:sslsocket(),
 	buffer       :: binary(),
 
 	requests     :: [{non_neg_integer(), {pid(), term()}}],
@@ -56,22 +59,25 @@
 		{keepalive, boolean()} | keepalive.
 -type database() :: atom() | binary().
 -type collection() :: atom() | binary().
--type write_error() :: not_master | {write_failure, Code :: non_neg_integer(), Message :: binary()}.
+-type read_mode() :: master | slave_ok.
+-type write_mode() :: safe | {safe, bson:document()} | unsafe.
 -type read_error()  :: not_master | not_authorized | {bad_query, bson:document()}.
+-type write_error() :: not_master | {write_failure, Code :: non_neg_integer(), Message :: binary()}.
 
 -include("mongo_protocol.hrl").
 
--spec start_link(mongo_client:id(), host(), 1..65535, options()) -> {ok, pid()}.
+-spec start_link(mongo_client:id(), host(), 1..65535, options()) ->
+		{ok, pid()}.
 start_link(Client, Host, Port, Options) ->
 	{ok, Connection} = gen_server:start_link(?MODULE, [Host, Port, Options], []),
 	ok = mongo_client:add_connection(Client, Connection),
 	{ok, Connection}.
 
--spec update(pid(), database(), collection(), bson:document(),
-	bson:document(), update_options()) -> ok | {error, write_error()}.
+-spec update(pid(), database(), collection(), bson:document(), bson:document(), write_mode(), update_options()) ->
+		ok | {error, write_error()}.
 -type update_options() :: [update_option()].
--type update_option() :: multiple | upsert | safe | no_safe | {safe, bson:document() | boolean()}.
-update(Pid, Database, Collection, Selector, Updater, Options) ->
+-type update_option() :: multiple | upsert.
+update(Pid, Database, Collection, Selector, Updater, WriteMode, Options) ->
 	write(Pid, Database, #update{
 		database = Database,
 		collection = Collection,
@@ -79,25 +85,26 @@ update(Pid, Database, Collection, Selector, Updater, Options) ->
 		updater = Updater,
 		multiple = proplists:get_bool(multiple, Options),
 		upsert = proplists:get_bool(upsert, Options)
-	}, Options).
+	}, WriteMode, Options).
 
--spec insert(pid(), database(), collection(), [bson:document()], insert_options()) -> ok | {error, write_error()}.
+-spec insert(pid(), database(), collection(), [bson:document()], write_mode(), insert_options()) ->
+		ok | {error, write_error()}.
 -type insert_options() :: [insert_option()].
--type insert_option()  :: continue_on_error | safe | no_safe | {safe, bson:document() | boolean()}.
-insert(Pid, Database, Collection, Documents, Options) ->
+-type insert_option()  :: continue_on_error.
+insert(Pid, Database, Collection, Documents, WriteMode, Options) ->
 	write(Pid, Database, #insert{
 		database = Database,
 		collection = Collection,
 		documents = Documents,
 		continue_on_error = proplists:get_bool(continue_on_error, Options)
-	}, Options).
+	}, WriteMode, Options).
 
--spec 'query'(pid(), database(), collection(), bson:document(),
-	bson:document() | undefined, non_neg_integer(), integer(), query_options()) ->
+-spec 'query'(pid(), database(), collection(), bson:document(), projector(), non_neg_integer(), integer(), read_mode(), query_options()) ->
 		{ok, cursor_id(), [bson:document()]} | {error, read_error()}.
+-type projector() :: bson:document() | undefined.
 -type query_options() :: [query_option()].
--type query_option() :: tailable | slave_ok | no_cursor_timeout | await_data | exhaust | partial.
-'query'(Pid, Database, Collection, Selector, Projector, Skip, Count, Options) ->
+-type query_option() :: tailable | no_cursor_timeout | exhaust | partial.
+'query'(Pid, Database, Collection, Selector, Projector, Skip, Count, ReadMode, Options) ->
 	read(Pid, Database, #'query'{
 		database = Database,
 		collection = Collection,
@@ -106,15 +113,15 @@ insert(Pid, Database, Collection, Documents, Options) ->
 		skip = Skip,
 		count = Count,
 		tailable = proplists:get_bool(tailable, Options),
-		slave_ok = proplists:get_bool(slave_ok, Options),
+		slave_ok = case ReadMode of master -> false; slave_ok -> true end,
 		no_cursor_timeout = proplists:get_bool(no_cursor_timeout, Options),
-		await_data = proplists:get_bool(await_data, Options),
+		await_data = proplists:get_bool(tailable, Options),
 		exhaust = proplists:get_bool(exhaust, Options),
 		partial = proplists:get_bool(partial, Options)
 	}, Options).
 
 -spec get_more(pid(), database(), collection(), integer(), cursor_id(), get_more_options()) ->
-	{ok, cursor_id(), [bson:document()]} | {error, read_error()}.
+		{ok, cursor_id(), [bson:document()]} | {error, read_error()}.
 -type get_more_options() :: [].
 get_more(Pid, Database, Collection, CursorId, Count, Options = []) ->
 	read(Pid, Database, #get_more{
@@ -124,17 +131,17 @@ get_more(Pid, Database, Collection, CursorId, Count, Options = []) ->
 		count = Count
 	}, Options).
 
--spec delete(pid(), database(), collection(), bson:document(), delete_options()) ->
-	ok | {error, write_error()}.
+-spec delete(pid(), database(), collection(), bson:document(), write_mode(), delete_options()) ->
+		ok | {error, write_error()}.
 -type delete_options() :: [delete_option()].
--type delete_option() :: single | safe | no_safe | {safe, bson:document() | boolean()}.
-delete(Pid, Database, Collection, Selector, Options) ->
+-type delete_option() :: single.
+delete(Pid, Database, Collection, Selector, WriteMode, Options) ->
 	write(Pid, Database, #delete{
 		database = Database,
 		collection = Collection,
 		selector = Selector,
 		single = proplists:get_bool(single, Options)
-	}, Options).
+	}, WriteMode, Options).
 
 -spec kill_cursors(pid(), [cursor_id()], kill_cursors_options()) -> ok.
 -type kill_cursors_options() :: [].
@@ -245,28 +252,22 @@ code_change(_Old, State, _Extra) ->
 
 
 %% @private
-write(Pid, Database, Update, Options) ->
-	Safe = case proplists:get_value(safe, Options, true) of
-		true -> [{}];
-		D when is_tuple(hd(D)) -> D;
-		_ -> false
-	end,
-	case Safe of
-		false ->
-			gen_server:cast(Pid, {notice, Update});
-		Safe ->
-			#reply{documents = [Doc | _]} = gen_server:call(Pid, {write, Database, Update, Safe}),
-			case bson:lookup([err], Doc) of
-				undefined ->
-					ok;
-				{ok, Message} when Message =:= undefined; Message =:= null ->
-					ok;
-				{ok, Message} ->
-					% TODO: support more error codes
-					case bson:at([code], Doc) of
-						10058 -> {error, not_master};
-						Code -> {error, {write_failure, Code, Message}}
-					end
+write(Pid, _Database, Update, unsafe, _Options) ->
+	gen_server:cast(Pid, {notice, Update});
+write(Pid, Database, Update, safe, Options) ->
+	write(Pid, Database, Update, {safe, [{}]}, Options);
+write(Pid, Database, Update, {safe, Safe}, _Options) ->
+	#reply{documents = [Doc | _]} = gen_server:call(Pid, {write, Database, Update, Safe}),
+	case bson:lookup([err], Doc) of
+		undefined ->
+			ok;
+		{ok, Message} when Message =:= undefined; Message =:= null ->
+			ok;
+		{ok, Message} ->
+			% TODO: support more error codes
+			case bson:at([code], Doc) of
+				10058 -> {error, not_master};
+				Code -> {error, {write_failure, Code, Message}}
 			end
 	end.
 

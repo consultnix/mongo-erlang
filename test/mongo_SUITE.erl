@@ -35,8 +35,8 @@ init_per_testcase(Case, Config) ->
 end_per_testcase(_Case, Config) ->
 	Database   = ?config(database, Config),
 	Collection = ?config(collection, Config),
-	ok = mongo:do(?MODULE, Database, fun() ->
-		mongo:delete_all(Collection, [{}])
+	ok = mongo:do(master, safe, ?MODULE, Database, fun() ->
+		mongo_admin:drop_collection(Collection)
 	end),
 	ok.
 
@@ -44,7 +44,7 @@ end_per_testcase(_Case, Config) ->
 insert_and_find(Config) ->
 	Database   = ?config(database, Config),
 	Collection = ?config(collection, Config),
-	mongo:do(?MODULE, Database, fun () ->
+	mongo:do(master, safe, ?MODULE, Database, fun () ->
 		{ok, []} = mongo:find_many(Collection, [{}], undefined, 0, 10),
 		{ok, Teams} = mongo:insert(Collection, [
 			[{name, <<"Yankees">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"American">>}],
@@ -70,7 +70,7 @@ insert_and_find(Config) ->
 insert_and_delete(Config) ->
 	Database   = ?config(database, Config),
 	Collection = ?config(collection, Config),
-	mongo:do(?MODULE, Database, fun () ->
+	mongo:do(master, safe, ?MODULE, Database, fun () ->
 		_Teams = mongo:insert(Collection, [
 			[{name, <<"Yankees">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"American">>}],
 			[{name, <<"Mets">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"National">>}],

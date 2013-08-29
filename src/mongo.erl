@@ -4,17 +4,17 @@
 	stop_client/1
 ]).
 -export([
-	do/3
+	do/5
 ]).
 -export([
 	insert/3,
 	insert/2,
 	update/4,
-	update_one/3,
-	update_all/3,
+	update_all/4,
+	update_one/4,
 	delete/3,
-	delete_one/2,
-	delete_all/2
+	delete_all/2,
+	delete_one/2
 ]).
 -export([
 	find_one/5,
@@ -28,9 +28,6 @@
 -export([
 	count/2,
 	count/3
-]).
--export([
-	ensure_index/2
 ]).
 -export([
 	command/1
@@ -56,13 +53,13 @@
 -type collection() :: mongo_connection:collection().
 -type cursor() :: mongo_cursor:cursor().
 
+-type read_mode()  :: mongo_connection:read_mode().
+-type write_mode() :: mongo_connection:write_mode().
+
 -type read_error()  :: mongo_connection:read_error().
 -type write_error() :: mongo_connection:write_error().
 
--record(context, {
-	connection :: pid(),
-	database   :: mongo:database()
-}).
+-include("mongo.hrl").
 
 -spec start_client(mongo_client:id(), mongo_client:host(), 1..65535, mongo_client:options()) -> ok.
 start_client(Id, Host, Port, Options) ->
@@ -73,13 +70,15 @@ start_client(Id, Host, Port, Options) ->
 stop_client(Id) ->
 	mongo_client:stop(Id).
 
--spec do(mongo_client:id() | pid(), mongo:database(), action(R)) -> R.
+-spec do(read_mode(), write_mode(), mongo_client:id() | pid(), mongo:database(), action(R)) -> R.
 -type action(R) :: fun(() -> R).
-do(Connection, Database, Action) when is_pid(Connection) ->
+do(ReadMode, WriteMode, Connection, Database, Action) when is_pid(Connection) ->
 	PrevContext = erlang:get(mongo_do_context),
 	erlang:put(mongo_do_context, #context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		read_mode = ReadMode,
+		write_mode = WriteMode
 	}),
 	try Action() of
 		Result -> Result
@@ -91,9 +90,9 @@ do(Connection, Database, Action) when is_pid(Connection) ->
 				erlang:put(mongo_do_context, PrevContext)
 		end
 	end;
-do(ClientId, Database, Action) ->
+do(ReadMode, WriteMode, ClientId, Database, Action) ->
 	Connection = mongo_client:get_connection(ClientId),
-	do(Connection, Database, Action).
+	do(ReadMode, WriteMode, Connection, Database, Action).
 
 -spec insert(collection(), bson:document() | [bson:document()], insert_options()) ->
 		{ok, bson:document()} | {ok, [bson:document()]} | {error, write_error()}.
@@ -106,11 +105,12 @@ insert(Collection, Doc, Options) when is_tuple(hd(Doc)) ->
 insert(Collection, Docs, Options) ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		write_mode = WriteMode
 	} = erlang:get(mongo_do_context),
 
 	Docs1 = [ensure_object_id(Doc) || Doc <- Docs],
-	case mongo_connection:insert(Connection, Database, Collection, Docs1, Options) of
+	case mongo_connection:insert(Connection, Database, Collection, Docs1, WriteMode, Options) of
 		ok -> {ok, Docs1};
 		{error, Error} -> {error, Error}
 	end.
@@ -124,15 +124,20 @@ insert(Collection, Docs) ->
 update(Collection, Selector, Updater, Options) ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		write_mode = WriteMode
 	} = erlang:get(mongo_do_context),
-	mongo_connection:update(Connection, Database, Collection, Selector, Updater, Options).
+	mongo_connection:update(Connection, Database, Collection, Selector, Updater, WriteMode, Options).
 
-update_one(Collection, Selector, Updater) ->
-	update(Collection, Selector, Updater, []).
+-spec update_all(collection(), bson:document(), bson:document(), boolean()) ->
+		ok | {error, write_error()}.
+update_all(Collection, Selector, Updater, Upsert) ->
+	update(Collection, Selector, Updater, [multiple | case Upsert of true -> [upsert]; false -> [] end]).
 
-update_all(Collection, Selector, Updater) ->
-	update(Collection, Selector, Updater, [multiple]).
+-spec update_one(collection(), bson:document(), bson:document(), boolean()) ->
+		ok | {error, write_error()}.
+update_one(Collection, Selector, Updater, Upsert) ->
+	update(Collection, Selector, Updater, case Upsert of true -> [upsert]; false -> [] end).
 
 -spec delete(collection(), bson:document(), delete_options()) ->
 		ok | {error, write_error()}.
@@ -140,15 +145,16 @@ update_all(Collection, Selector, Updater) ->
 delete(Collection, Selector, Options) ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		write_mode = WriteMode
 	} = erlang:get(mongo_do_context),
-	mongo_connection:delete(Connection, Database, Collection, Selector, Options).
-
-delete_one(Collection, Selector) ->
-	delete(Collection, Selector, [single]).
+	mongo_connection:delete(Connection, Database, Collection, Selector, WriteMode, Options).
 
 delete_all(Collection, Selector) ->
 	delete(Collection, Selector, []).
+
+delete_one(Collection, Selector) ->
+	delete(Collection, Selector, [single]).
 
 -spec find_one(collection(), bson:document(), undefined | bson:document(), non_neg_integer(), find_options()) ->
 		{ok, bson:document()} | {error, not_found | read_error()}.
@@ -156,9 +162,10 @@ delete_all(Collection, Selector) ->
 find_one(Collection, Selector, Projector, Skip, Options) ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		read_mode = ReadMode
 	} = erlang:get(mongo_do_context),
-	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, -1, Options) of
+	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, -1, ReadMode, Options) of
 		{ok, 0, []} -> {error, not_found};
 		{ok, 0, [Doc]} -> {ok, Doc};
 		Error -> Error
@@ -178,9 +185,10 @@ find_one(Collection, Selector) ->
 find_many(Collection, Selector, Projector, Skip, Limit, Options) when is_integer(Limit), Limit > 0 ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		read_mode = ReadMode
 	} = erlang:get(mongo_do_context),
-	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, -Limit, Options) of
+	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, -Limit, ReadMode, Options) of
 		{ok, 0, Documents} -> {ok, Documents};
 		Error -> Error
 	end.
@@ -193,9 +201,10 @@ find_many(Collection, Selector, Projector, Skip, Limit) ->
 find(Collection, Selector, Projector, Skip, Count, Options) ->
 	#context{
 		connection = Connection,
-		database = Database
+		database = Database,
+		read_mode = ReadMode
 	} = erlang:get(mongo_do_context),
-	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, Count, Options) of
+	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, Count, ReadMode, Options) of
 		{ok, Cursor, Batch} ->
 			mongo_cursor:create(Connection, Database, Collection, Cursor, Count, Batch);
 		Error ->
@@ -229,22 +238,6 @@ command(Command) ->
 			Error
 	end.
 
--spec ensure_index(collection(), bson:document()) -> ok | {error, write_error()}.
-ensure_index(Collection, Index) ->
-	Defaults = [
-		{name, index_name(bson:at(key, Index))},
-		{unique, false},
-		{dropDups, false}
-	],
-	#context{database = Database} = erlang:get(mongo_do_context),
-	Namespace = <<(to_binary(Database))/binary, $., (to_binary(Collection))/binary>>,
-	case insert('system.indexes', [
-		bson:update(ns, Namespace, bson:merge(Index, Defaults))
-	]) of
-		{ok, _} -> ok;
-		Error -> Error
-	end.
-
 -spec object_id() -> bson:object_id().
 object_id() ->
 	LocalId = ets:lookup_element(mongo, oid_local_id, 2),
@@ -268,9 +261,3 @@ to_binary(Value) when is_binary(Value) ->
 	Value;
 to_binary(_Value) ->
 	<<>>.
-
-%% @private
-index_name(KeyOrder) ->
-	lists:foldl(fun({Label, Order}, Acc) ->
-		<<Acc/binary, $_, (to_binary(Label))/binary, $_, (to_binary(Order))/binary>>
-	end, <<"i">>, KeyOrder).
