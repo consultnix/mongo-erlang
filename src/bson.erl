@@ -8,7 +8,8 @@
 -export([
 	lookup/2,
 	lookup/3,
-	at/2
+	at/2,
+	fold/3
 ]).
 
 -export([
@@ -118,6 +119,12 @@ at(Path, Document) ->
 		{ok, Value} -> Value;
 		undefined -> erlang:error(missing_field)
 	end.
+
+-spec fold(fun((label(), value(), Acc) -> Acc), Acc, bson:document()) -> Acc when Acc :: term().
+fold(Fun, Acc, [{Label, Value} | Rest]) ->
+	fold(Fun, Fun(Label, Value, Acc), Rest);
+fold(Fun, Acc, Document) when is_function(Fun, 3), Document =:= []; Document =:= [{}] ->
+	Acc.
 
 -spec update(lookup_path(), value(), document()) -> document().
 % TODO: support full paths when updating
@@ -375,6 +382,14 @@ lookup_test_() ->
 	],
 	[fun() -> Result = lookup(Path, test_document()) end || {Path, Result} <- Tests].
 
+fold_test_() ->
+	Tests = [
+		{fun(Key, _Value, Acc) -> [Key | Acc] end, [], [{a, 1}, {b, 2}, {c, 3}], [c, b, a]},
+		{fun(_Key, Value, Acc) -> [Value | Acc] end, [], [{a, 1}, {b, 2}, {c, 3}], [3, 2, 1]},
+		{fun(_Key, Value, Acc) -> [Value | Acc] end, [], [{}], []}
+	],
+	[fun() -> Result = fold(Fun, Acc, Doc) end || {Fun, Acc, Doc, Result} <- Tests].
+
 update_test_() ->
 	Tests = [
 		{{a, 1}, [{}], [{a, 1}]},
@@ -384,7 +399,6 @@ update_test_() ->
 		{{b, 1}, [{a, 0}], [{b, 1}, {a, 0}]}
 	],
 	[fun() -> Result = update(Key, Value, Doc) end || {{Key, Value}, Doc, Result} <- Tests].
-
 
 
 test_document() ->
