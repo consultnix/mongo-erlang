@@ -1,5 +1,6 @@
 -module(mongo_admin).
 -export([
+	ensure_index/3,
 	ensure_index/2
 ]).
 -export([
@@ -9,19 +10,17 @@
 
 -include("mongo.hrl").
 
--spec ensure_index(mongo:collection(), bson:document()) -> ok | {error, mongo:write_error()}.
-ensure_index(Collection, Index) ->
-	Defaults = [
-		{name, index_name(bson:at(key, Index))},
-		{unique, false},
-		{dropDups, false}
-	],
-	#context{database = Database} = erlang:get(mongo_do_context),
-	Namespace = <<(to_binary(Database))/binary, $., (to_binary(Collection))/binary>>,
-	case mongo:insert('system.indexes', [bson:update(ns, Namespace, bson:merge(Index, Defaults))]) of
-		{ok, _} -> ok;
-		Error -> Error
-	end.
+-spec ensure_index(mongo:collection(), bson:document(), [bson:field() | bson:label()]) ->
+		ok | {error, mongo:write_error()}.
+ensure_index(Collection, Key, Options) ->
+	ensure_index_i(Collection, bson:update(key, Key, lists:foldl(fun
+		({Option, Value}, Acc) -> bson:update(Option, Value, Acc);
+		(Option, Acc) when is_atom(Option); is_binary(Option) -> bson:update(Option, true, Acc);
+		({}, Acc) -> Acc
+	end, bson:new(), Options))).
+
+ensure_index(Collection, Key) ->
+	ensure_index(Collection, Key, []).
 
 -spec drop_collection(mongo:collection()) -> ok | {error, {bad_command, bson:document()} | mongo:read_error()}.
 drop_collection(Collection) ->
@@ -46,6 +45,21 @@ drop_database() ->
 			ok;
 		{error, Error} ->
 			{error, Error}
+	end.
+
+
+%% @private
+ensure_index_i(Collection, Index) ->
+	Defaults = [
+		{name, index_name(bson:at(key, Index))},
+		{unique, false},
+		{dropDups, false}
+	],
+	#context{database = Database} = erlang:get(mongo_do_context),
+	Namespace = <<(to_binary(Database))/binary, $., (to_binary(Collection))/binary>>,
+	case mongo:insert('system.indexes', [bson:update(ns, Namespace, bson:merge(Index, Defaults))]) of
+		{ok, _} -> ok;
+		Error -> Error
 	end.
 
 %% @private

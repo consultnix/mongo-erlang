@@ -30,6 +30,9 @@
 
 -export_type([
 	document/0,
+	field/0,
+	label/0,
+	value/0,
 	object_id/0
 ]).
 
