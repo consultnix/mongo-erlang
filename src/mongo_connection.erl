@@ -62,7 +62,7 @@
 -type read_mode() :: master | slave_ok.
 -type write_mode() :: safe | {safe, bson:document()} | unsafe.
 -type read_error()  :: not_master | not_authorized | {bad_query, bson:document()}.
--type write_error() :: not_master | {write_failure, Code :: non_neg_integer(), Message :: binary()}.
+-type write_error() :: not_master | {duplicate_key, Message :: binary()} | {write_failure, Code :: non_neg_integer(), Message :: binary()}.
 
 -include("mongo_protocol.hrl").
 
@@ -267,6 +267,7 @@ write(Pid, Database, Update, {safe, Safe}, _Options) ->
 			% TODO: support more error codes
 			case bson:at([code], Doc) of
 				10058 -> {error, not_master};
+				Code when Code =:= 11000; Code =:= 11001 -> {error, {duplicate_key, Message}};
 				Code -> {error, {write_failure, Code, Message}}
 			end
 	end.
