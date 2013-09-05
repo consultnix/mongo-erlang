@@ -134,7 +134,7 @@ decode_message(<<?HEADER(Id, ResponseTo, ?OP_REPLY), Data/binary>>) ->
 decode_documents(0, Data, Acc) ->
 	{lists:reverse(Acc), Data};
 decode_documents(Count, Data, Acc) ->
-	{Doc, Rest} = bson:decode(Data, [{label, existing_atom}]),
+	{Doc, Rest} = bson:decode(Data),
 	decode_documents(Count - 1, Rest, [Doc | Acc]).
 
 %% @private
