@@ -13,7 +13,7 @@
 -spec ensure_index(mongo:collection(), bson:document(), [bson:field() | bson:label()]) ->
 		ok | {error, mongo:write_error()}.
 ensure_index(Collection, Key, Options) ->
-	ensure_index_i(Collection, bson:update(key, Key, lists:foldl(fun
+	ensure_index_i(Collection, bson:update(<<"key">>, Key, lists:foldl(fun
 		({Option, Value}, Acc) -> bson:update(Option, Value, Acc);
 		(Option, Acc) when is_atom(Option); is_binary(Option) -> bson:update(Option, true, Acc);
 		({}, Acc) -> Acc
@@ -24,11 +24,11 @@ ensure_index(Collection, Key) ->
 
 -spec drop_collection(mongo:collection()) -> ok | {error, {bad_command, bson:document()} | mongo:read_error()}.
 drop_collection(Collection) ->
-	case mongo:command([{drop, Collection}]) of
+	case mongo:command([{<<"drop">>, Collection}]) of
 		{ok, _} ->
 			ok;
 		{error, {bad_command, Error}} ->
-			case bson:at(errmsg, Error) of
+			case bson:at(<<"errmsg">>, Error) of
 				<<"ns not found">> ->
 					ok;
 				_ ->
@@ -40,7 +40,7 @@ drop_collection(Collection) ->
 
 -spec drop_database() -> ok | {error, mongo:read_error()}.
 drop_database() ->
-	case mongo:command([{dropDatabase, 1}]) of
+	case mongo:command([{<<"dropDatabase">>, 1}]) of
 		{ok, _} ->
 			ok;
 		{error, Error} ->
@@ -51,13 +51,13 @@ drop_database() ->
 %% @private
 ensure_index_i(Collection, Index) ->
 	Defaults = [
-		{name, index_name(bson:at(key, Index))},
-		{unique, false},
-		{dropDups, false}
+		{<<"name">>, index_name(bson:at(<<"key">>, Index))},
+		{<<"unique">>, false},
+		{<<"dropDups">>, false}
 	],
 	#context{database = Database} = erlang:get(mongo_do_context),
 	Namespace = <<(to_binary(Database))/binary, $., (to_binary(Collection))/binary>>,
-	case mongo:insert('system.indexes', [bson:update(ns, Namespace, bson:merge(Index, Defaults))]) of
+	case mongo:insert('system.indexes', [bson:update(<<"ns">>, Namespace, bson:merge(Index, Defaults))]) of
 		{ok, _} -> ok;
 		Error -> Error
 	end.

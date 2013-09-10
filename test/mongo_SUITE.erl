@@ -47,24 +47,24 @@ insert_and_find(Config) ->
 	mongo:do(master, safe, ?MODULE, Database, fun () ->
 		{ok, []} = mongo:find_many(Collection, [{}], undefined, 0, 10),
 		{ok, Teams} = mongo:insert(Collection, [
-			[{name, <<"Yankees">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"American">>}],
-			[{name, <<"Mets">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"National">>}],
-			[{name, <<"Phillies">>}, {home, [{city, <<"Philadelphia">>}, {state, <<"PA">>}]}, {league, <<"National">>}],
-			[{name, <<"Red Sox">>}, {home, [{city, <<"Boston">>}, {state, <<"MA">>}]}, {league, <<"American">>}]
+			[{<<"name">>, <<"Yankees">>}, {<<"home">>, [{<<"city">>, <<"New York">>}, {<<"state">>, <<"NY">>}]}, {<<"league">>, <<"American">>}],
+			[{<<"name">>, <<"Mets">>}, {<<"home">>, [{<<"city">>, <<"New York">>}, {<<"state">>, <<"NY">>}]}, {<<"league">>, <<"National">>}],
+			[{<<"name">>, <<"Phillies">>}, {<<"home">>, [{<<"city">>, <<"Philadelphia">>}, {<<"state">>, <<"PA">>}]}, {<<"league">>, <<"National">>}],
+			[{<<"name">>, <<"Red Sox">>}, {<<"home">>, [{<<"city">>, <<"Boston">>}, {<<"state">>, <<"MA">>}]}, {<<"league">>, <<"American">>}]
 		]),
 		{ok, 4} = mongo:count(Collection, [{}]),
 		{ok, Teams} = mongo:find_many(Collection, [{}], undefined, 0, 10),
 
-		NationalTeams = [Team || Team <- Teams, bson:at(league, Team) == <<"National">>],
-		{ok, NationalTeams} = mongo:find_many(Collection, [{league, <<"National">>}], undefined, 0, 10),
-		{ok, 2} = mongo:count(Collection, [{league, <<"National">>}]),
+		NationalTeams = [Team || Team <- Teams, bson:at(<<"league">>, Team) == <<"National">>],
+		{ok, NationalTeams} = mongo:find_many(Collection, [{<<"league">>, <<"National">>}], undefined, 0, 10),
+		{ok, 2} = mongo:count(Collection, [{<<"league">>, <<"National">>}]),
 
-		TeamNames = [[{name, bson:at(name, Team)}] || Team <- Teams],
-		{ok, TeamNames} = mongo:find_many(Collection, [{}], [{'_id', 0}, {name, 1}], 0, 10),
+		TeamNames = [[{<<"name">>, bson:at(<<"name">>, Team)}] || Team <- Teams],
+		{ok, TeamNames} = mongo:find_many(Collection, [{}], [{<<"_id">>, 0}, {<<"name">>, 1}], 0, 10),
 
 
 		BostonTeam = lists:last(Teams),
-		{ok, BostonTeam} = mongo:find_one(Collection, [{home, [{city, <<"Boston">>}, {state, <<"MA">>}]}])
+		{ok, BostonTeam} = mongo:find_one(Collection, [{<<"home">>, [{<<"city">>, <<"Boston">>}, {<<"state">>, <<"MA">>}]}])
 	end).
 
 insert_and_delete(Config) ->
@@ -72,10 +72,10 @@ insert_and_delete(Config) ->
 	Collection = ?config(collection, Config),
 	mongo:do(master, safe, ?MODULE, Database, fun () ->
 		_Teams = mongo:insert(Collection, [
-			[{name, <<"Yankees">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"American">>}],
-			[{name, <<"Mets">>}, {home, [{city, <<"New York">>}, {state, <<"NY">>}]}, {league, <<"National">>}],
-			[{name, <<"Phillies">>}, {home, [{city, <<"Philadelphia">>}, {state, <<"PA">>}]}, {league, <<"National">>}],
-			[{name, <<"Red Sox">>}, {home, [{city, <<"Boston">>}, {state, <<"MA">>}]}, {league, <<"American">>}]
+			[{<<"name">>, <<"Yankees">>}, {<<"home">>, [{<<"city">>, <<"New York">>}, {<<"state">>, <<"NY">>}]}, {<<"league">>, <<"American">>}],
+			[{<<"name">>, <<"Mets">>}, {<<"home">>, [{<<"city">>, <<"New York">>}, {<<"state">>, <<"NY">>}]}, {<<"league">>, <<"National">>}],
+			[{<<"name">>, <<"Phillies">>}, {<<"home">>, [{<<"city">>, <<"Philadelphia">>}, {<<"state">>, <<"PA">>}]}, {<<"league">>, <<"National">>}],
+			[{<<"name">>, <<"Red Sox">>}, {<<"home">>, [{<<"city">>, <<"Boston">>}, {<<"state">>, <<"MA">>}]}, {<<"league">>, <<"American">>}]
 		]),
 		{ok, 4} = mongo:count(Collection, [{}]),
 

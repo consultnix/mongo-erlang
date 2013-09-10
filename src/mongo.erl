@@ -218,18 +218,18 @@ count(Collection, Selector) ->
 -spec count(collection(), bson:document(), integer()) -> {ok, non_neg_integer()} | {error, read_error()}.
 count(Collection, Selector, Limit) ->
 	case command(if
-		Limit =< 0 -> [{count, to_binary(Collection)}, {'query', Selector}];
-		Limit > 0 -> [{count, to_binary(Collection)}, {'query', Selector}, {limit, Limit}]
+		Limit =< 0 -> [{<<"count">>, to_binary(Collection)}, {<<"query">>, Selector}];
+		Limit > 0 -> [{<<"count">>, to_binary(Collection)}, {<<"query">>, Selector}, {<<"limit">>, Limit}]
 	end) of
-		{ok, Reply} -> {ok, trunc(bson:at(n, Reply))};
+		{ok, Reply} -> {ok, trunc(bson:at(<<"n">>, Reply))};
 		Error -> Error
 	end.
 
 -spec command(bson:document()) -> {ok, bson:document()} | {error, {bad_command, bson:document()} | read_error()}.
 command(Command) ->
-	case find_one('$cmd', Command) of
+	case find_one(<<"$cmd">>, Command) of
 		{ok, Doc} ->
-			case bson:at(ok, Doc) of
+			case bson:at(<<"ok">>, Doc) of
 				true -> {ok, Doc};
 				N when N == 1 -> {ok, Doc};
 				_ -> {error, {bad_command, Doc}}
@@ -247,9 +247,9 @@ object_id() ->
 
 %% @private
 ensure_object_id(Doc) ->
-	case bson:lookup('_id', Doc) of
+	case bson:lookup(<<"_id">>, Doc) of
 		{ok, _Value} -> Doc;
-		undefined -> bson:update('_id', mongo:object_id(), Doc)
+		undefined -> bson:update(<<"_id">>, mongo:object_id(), Doc)
 	end.
 
 %% @private

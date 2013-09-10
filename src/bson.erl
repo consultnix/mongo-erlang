@@ -45,7 +45,7 @@
 
 -type document() :: [{}] | [field()].
 -type field()    :: {label(), value()}.
--type label()    :: atom() | utf8().
+-type label()    :: utf8().
 -type value()    :: float() |
 		utf8() |
 		document() |
@@ -87,8 +87,7 @@ encode(Document) when is_tuple(hd(Document)) ->
 decode(Data) ->
 	decode(Data, []).
 
--spec decode(binary(), [decode_option()]) -> {document(), binary()}.
--type decode_option() :: {label, binary | atom | existing_atom}.
+-spec decode(binary(), []) -> {document(), binary()}.
 decode(<<?INT32(N), Payload/binary>> = Data, Options) ->
 	Size = N - 5,
 	case Payload of
@@ -112,7 +111,7 @@ lookup([Index | Rest], Document) ->
 		{'EXIT', _} -> undefined;
 		Value -> lookup(Rest, Value)
 	end;
-lookup(Label, Document) when is_atom(Label); is_binary(Label); is_integer(Label) ->
+lookup(Label, Document) when is_binary(Label); is_integer(Label) ->
 	lookup([Label], Document).
 
 -spec lookup(lookup_path(), document(), Default) -> value() | Default when Default::term().
@@ -140,8 +139,7 @@ new() ->
 	[{}].
 
 -spec include([label()], document()) -> document().
-include(Labels0, Document) ->
-	Labels = [existing_atom(Label) || Label <- Labels0],
+include(Labels, Document) ->
 	fold(fun(Label, Value, Acc) ->
 		case lists:member(Label, Labels) of
 			true -> bson:update(Label, Value, Acc);
@@ -150,8 +148,7 @@ include(Labels0, Document) ->
 	end, bson:new(), Document).
 
 -spec exclude([label()], document()) -> document().
-exclude(Labels0, Document) ->
-	Labels = [existing_atom(Label) || Label <- Labels0],
+exclude(Labels, Document) ->
 	fold(fun(Label, Value, Acc) ->
 		case lists:member(Label, Labels) of
 			false -> bson:update(Label, Value, Acc);
@@ -177,9 +174,9 @@ project(Projector, Document) ->
 
 -spec update(lookup_path(), value(), document()) -> document().
 % TODO: support full paths when updating
-update(Label, Value, [{}]) when is_atom(Label); is_binary(Label) ->
+update(Label, Value, [{}]) when is_binary(Label) ->
 	[{Label, Value}];
-update(Label, Value, Document) when is_atom(Label); is_binary(Label) ->
+update(Label, Value, Document) when is_binary(Label) ->
 	case lookup_i(Label, Document) of
 		{Label1, _} -> lists:keyreplace(Label1, 1, Document, {Label1, Value});
 		undefined -> [{Label, Value} | Document]
@@ -270,11 +267,9 @@ encode([{Label, Value} | Rest], Acc) ->
 	encode(Rest, <<Acc/binary, ?INT8(Type), ?CSTRING(encode_label(Label)), Payload/binary>>).
 
 %% @private
-encode_label(Label) when is_atom(Label) ->
-	atom_to_binary(Label, utf8);
 encode_label(Label) when is_integer(Label) ->
 	list_to_binary(integer_to_list(Label));
-encode_label(Label) ->
+encode_label(Label) when is_binary(Label) ->
 	unicode:characters_to_binary(Label).
 
 %% @private
@@ -374,12 +369,8 @@ decode_cstring(<<C, Rest/binary>>, Acc) ->
 	decode_cstring(Rest, <<Acc/binary, C>>).
 
 %% @private
-decode_label(Label, Options) ->
-	case lists:keyfind(label, 1, Options) of
-		{label, atom} -> binary_to_atom(Label, utf8);
-		{label, existing_atom} -> existing_atom(Label);
-		_ -> Label
-	end.
+decode_label(Label, _Options) when is_binary(Label) ->
+	Label.
 
 %% @private
 lookup_i(_, [{}]) ->
@@ -388,92 +379,80 @@ lookup_i(_, []) ->
 	undefined;
 lookup_i(Label, [{Label, Value} | _]) ->
 	{Label, Value};
-lookup_i(Label0, [{Label1, _} | _] = Document) when is_atom(Label0), is_binary(Label1) ->
-	lookup_i(atom_to_binary(Label0, utf8), Document);
-lookup_i(Label0, [{Label1, _} | _] = Document) when is_binary(Label0), is_atom(Label1) ->
-	lookup_i(existing_atom(Label0), Document);
 lookup_i(Label, [_ | Rest]) ->
 	lookup_i(Label, Rest).
 
 %% @private
-existing_atom(Binary) when is_binary(Binary) ->
-	try binary_to_existing_atom(Binary, utf8) of
-		L -> L
-	catch
-		error:badarg -> Binary
-	end;
-existing_atom(Atom) when is_atom(Atom) ->
-	Atom.
 
 -ifdef(TEST).
 
 encode_test_() ->
 	Tests = [
 		{[{}], <<?INT32(5), ?NULL>>},
-		{[{a, 1.0}], <<?INT32(16), ?INT8(1), "a", ?NULL, 1.0:64/float-little, ?NULL>>},
-		{[{a, <<"a">>}], <<?INT32(14), ?INT8(2), "a", ?NULL, ?INT32(2), "a", ?NULL, ?NULL>>},
-		{[{'BSON', [<<"awesome">>, 5.05, 1986]}], <<49,0,0,0,4,66,83,79,78,0,38,0,0,0,2,48,0,8,0,0,0,97,119,101,115,111,109,101,0,1,49,0,51,51,51,51,51,51,20,64,16,50,0,194,7,0,0,0,0>>}
+		{[{<<"a">>, 1.0}], <<?INT32(16), ?INT8(1), "a", ?NULL, 1.0:64/float-little, ?NULL>>},
+		{[{<<"a">>, <<"a">>}], <<?INT32(14), ?INT8(2), "a", ?NULL, ?INT32(2), "a", ?NULL, ?NULL>>},
+		{[{<<"BSON">>, [<<"awesome">>, 5.05, 1986]}], <<49,0,0,0,4,66,83,79,78,0,38,0,0,0,2,48,0,8,0,0,0,97,119,101,115,111,109,101,0,1,49,0,51,51,51,51,51,51,20,64,16,50,0,194,7,0,0,0,0>>}
 	],
 	[fun() -> Result = encode(Input) end || {Input, Result} <- Tests].
 
 roundtrip_test() ->
 	Document = test_document(),
-	{Document, <<>>} = decode(encode(Document), [{label, existing_atom}]).
+	{Document, <<>>} = decode(encode(Document), []).
 
 lookup_test_() ->
 	Tests = [
-		{a, {ok, -4.230845}},
+		{<<"a">>, {ok, -4.230845}},
 		{<<"a">>, {ok, -4.230845}},
 		{[<<"a">>], {ok, -4.230845}},
-		{[c, x], {ok, -1}},
-		{[c, z], undefined},
-		{[c, z, y], undefined},
-		{[d1, 2], {ok, 45}},
-		{[d1, 10], undefined}
+		{[<<"c">>, <<"x">>], {ok, -1}},
+		{[<<"c">>, <<"z">>], undefined},
+		{[<<"c">>, <<"z">>, <<"y">>], undefined},
+		{[<<"d1">>, 2], {ok, 45}},
+		{[<<"d1">>, 10], undefined}
 	],
 	[fun() -> Result = lookup(Path, test_document()) end || {Path, Result} <- Tests].
 
 fold_test_() ->
 	Tests = [
-		{fun(Key, _Value, Acc) -> [Key | Acc] end, [], [{a, 1}, {b, 2}, {c, 3}], [c, b, a]},
-		{fun(_Key, Value, Acc) -> [Value | Acc] end, [], [{a, 1}, {b, 2}, {c, 3}], [3, 2, 1]},
+		{fun(Key, _Value, Acc) -> [Key | Acc] end, [], [{<<"a">>, 1}, {<<"b">>, 2}, {<<"c">>, 3}], [<<"c">>, <<"b">>, <<"a">>]},
+		{fun(_Key, Value, Acc) -> [Value | Acc] end, [], [{<<"a">>, 1}, {<<"b">>, 2}, {<<"c">>, 3}], [3, 2, 1]},
 		{fun(_Key, Value, Acc) -> [Value | Acc] end, [], [{}], []}
 	],
 	[fun() -> Result = fold(Fun, Acc, Doc) end || {Fun, Acc, Doc, Result} <- Tests].
 
 include_test_() ->
 	Tests = [
-		{[a], [{a, -4.230845}]},
+		{[<<"a">>], [{<<"a">>, -4.230845}]},
 		{[], [{}]},
-		{[z], [{}]},
-		{[a, z], [{a, -4.230845}]}
+		{[<<"z">>], [{}]},
+		{[<<"a">>, <<"z">>], [{<<"a">>, -4.230845}]}
 	],
 	[fun() -> Result = include(Labels, test_document()) end || {Labels, Result} <- Tests].
 
 exclude_test_() ->
 	Doc = test_document(),
 	Tests = [
-		{[b, c, d1, d2, e, f, g, h, i, j, k1, k2, l, m, n, o1, o2, p, q1, q2, r, s1, s2], [{a, -4.230845}]},
+		{[<<"b">>, <<"c">>, <<"d1">>, <<"d2">>, <<"e">>, <<"f">>, <<"g">>, <<"h">>, <<"i">>, <<"j">>, <<"k1">>, <<"k2">>, <<"l">>, <<"m">>, <<"n">>, <<"o1">>, <<"o2">>, <<"p">>, <<"q1">>, <<"q2">>, <<"r">>, <<"s1">>, <<"s2">>], [{<<"a">>, -4.230845}]},
 		{[], lists:reverse(Doc)}
 	],
 	[fun() -> Result = exclude(Labels, Doc) end || {Labels, Result} <- Tests].
 
 project_test_() ->
 	Tests = [
-		{[{a, 1}], [{a, -4.230845}]},
+		{[{<<"a">>, 1}], [{<<"a">>, -4.230845}]},
 		{[], [{}]},
-		{[{z, 1}], [{}]},
-		{[{a, 1}, {z, 1}], [{a, -4.230845}]}
+		{[{<<"z">>, 1}], [{}]},
+		{[{<<"a">>, 1}, {<<"z">>, 1}], [{<<"a">>, -4.230845}]}
 	],
 	[fun() -> Result = project(Projector, test_document()) end || {Projector, Result} <- Tests].
 
 update_test_() ->
 	Tests = [
-		{{a, 1}, [{}], [{a, 1}]},
-		{{a, 1}, [{a, 0}], [{a, 1}]},
-		{{a, 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
-		{{[a], 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
-		{{b, 1}, [{a, 0}], [{b, 1}, {a, 0}]}
+		{{<<"a">>, 1}, [{}], [{<<"a">>, 1}]},
+		{{<<"a">>, 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
+		{{<<"a">>, 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
+		{{[<<"a">>], 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
+		{{<<"b">>, 1}, [{<<"a">>, 0}], [{<<"b">>, 1}, {<<"a">>, 0}]}
 	],
 	[fun() -> Result = update(Key, Value, Doc) end || {{Key, Value}, Doc, Result} <- Tests].
 
@@ -482,30 +461,30 @@ test_document() ->
 	Data = <<200,12,240,129,100,90,56,198,34,0,0>>,
 	Time = os:timestamp(),
 	[
-		{a, -4.230845},
-		{b, <<"hello">>},
-		{c, [{x, -1}, {y, 2.2001}]},
-		{d1, [23, 45, 200]},
-		{d2, []},
-		{e, {data, binary, Data}},
-		{f, {data, function, Data}},
-		{g, {data, uuid, Data}},
-		{h, {data, md5, Data}},
-		{i, {data, user, Data}},
-		{j, object_id(Time, 2, 3, 4)},
-		{k1, false},
-		{k2, true},
-		{l, milliseconds_precision(Time)},
-		{m, undefined},
-		{n, {regex, <<"foo">>, <<"bar">>}},
-		{o1, {javascript, [{}], <<"function(x) = x + 1;">>}},
-		{o2, {javascript, [{x, 0}, {y, <<"foo">>}], <<"function(a) = a + x">>}},
-		{p, atom},
-		{q1, -2000444000},
-		{q2, -8000111000222001},
-		{r, {timestamp, 100022, 995332003}},
-		{s1, min_key},
-		{s2, max_key}
+		{<<"a">>, -4.230845},
+		{<<"b">>, <<"hello">>},
+		{<<"c">>, [{<<"x">>, -1}, {<<"y">>, 2.2001}]},
+		{<<"d1">>, [23, 45, 200]},
+		{<<"d2">>, []},
+		{<<"e">>, {data, binary, Data}},
+		{<<"f">>, {data, function, Data}},
+		{<<"g">>, {data, uuid, Data}},
+		{<<"h">>, {data, md5, Data}},
+		{<<"i">>, {data, user, Data}},
+		{<<"j">>, object_id(Time, 2, 3, 4)},
+		{<<"k1">>, false},
+		{<<"k2">>, true},
+		{<<"l">>, milliseconds_precision(Time)},
+		{<<"m">>, undefined},
+		{<<"n">>, {regex, <<"foo">>, <<"bar">>}},
+		{<<"o1">>, {javascript, [{}], <<"function(x) = x + 1;">>}},
+		{<<"o2">>, {javascript, [{<<"x">>, 0}, {<<"y">>, <<"foo">>}], <<"function(a) = a + x">>}},
+		{<<"p">>, atom},
+		{<<"q1">>, -2000444000},
+		{<<"q2">>, -8000111000222001},
+		{<<"r">>, {timestamp, 100022, 995332003}},
+		{<<"s1">>, min_key},
+		{<<"s2">>, max_key}
 	].
 
 milliseconds_precision({MegaSecs, Secs, MicroSecs}) ->

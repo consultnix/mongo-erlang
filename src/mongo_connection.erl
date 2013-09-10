@@ -189,8 +189,8 @@ handle_call({write, Database, Update, Safe}, From, #state{next_id = Id} = State)
 		encode(Id, Update),
 		encode(Id + 1, #'query'{
 			database = Database,
-			collection = '$cmd',
-			selector = bson:update(getlasterror, 1, Safe),
+			collection = <<"$cmd">>,
+			selector = bson:update(<<"getlasterror">>, 1, Safe),
 			count = -1
 		})
 	],
@@ -258,14 +258,14 @@ write(Pid, Database, Update, safe, Options) ->
 	write(Pid, Database, Update, {safe, [{}]}, Options);
 write(Pid, Database, Update, {safe, Safe}, _Options) ->
 	#reply{documents = [Doc | _]} = gen_server:call(Pid, {write, Database, Update, Safe}),
-	case bson:lookup([err], Doc) of
+	case bson:lookup([<<"err">>], Doc) of
 		undefined ->
 			ok;
 		{ok, Message} when Message =:= undefined; Message =:= null ->
 			ok;
 		{ok, Message} ->
 			% TODO: support more error codes
-			case bson:at([code], Doc) of
+			case bson:at([<<"code">>], Doc) of
 				10058 -> {error, not_master};
 				Code when Code =:= 11000; Code =:= 11001 -> {error, {duplicate_key, Message}};
 				Code -> {error, {write_failure, Code, Message}}
@@ -278,7 +278,7 @@ read(Pid, _Database, Query, _Options) ->
 		#reply{cursor_not_found = false, query_error = false} = Reply ->
 			{ok, Reply#reply.cursor_id, Reply#reply.documents};
 		#reply{cursor_not_found = false, query_error = true, documents = [Doc | _]}  ->
-			{error, case bson:at([code], Doc) of
+			{error, case bson:at([<<"code">>], Doc) of
 				% TODO: support more error codes
 				13435 -> not_master;
 				10057 -> not_authorized;
