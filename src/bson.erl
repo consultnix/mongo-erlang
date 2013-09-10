@@ -101,10 +101,10 @@ decode(<<?INT32(N), Payload/binary>> = Data, Options) ->
 -type lookup_path() :: label() | pos_integer() | [label() | pos_integer()].
 lookup([], Document) ->
 	{ok, Document};
-lookup([Label | Rest], Document) when not is_integer(Label) ->
-	case lookup_i(Label, Document) of
+lookup([Label | Rest], Document) when is_binary(Label) ->
+	case lists:keyfind(Label, 1, Document) of
 		{_, Value} -> lookup(Rest, Value);
-		undefined -> undefined
+		false -> undefined
 	end;
 lookup([Index | Rest], Document) ->
 	case catch lists:nth(Index, Document) of
@@ -177,10 +177,7 @@ project(Projector, Document) ->
 update(Label, Value, [{}]) when is_binary(Label) ->
 	[{Label, Value}];
 update(Label, Value, Document) when is_binary(Label) ->
-	case lookup_i(Label, Document) of
-		{Label1, _} -> lists:keyreplace(Label1, 1, Document, {Label1, Value});
-		undefined -> [{Label, Value} | Document]
-	end;
+	lists:keystore(Label, 1, Document, {Label, Value});
 update([Label], Value, Document) ->
 	update(Label, Value, Document).
 
@@ -373,16 +370,6 @@ decode_label(Label, _Options) when is_binary(Label) ->
 	Label.
 
 %% @private
-lookup_i(_, [{}]) ->
-	undefined;
-lookup_i(_, []) ->
-	undefined;
-lookup_i(Label, [{Label, Value} | _]) ->
-	{Label, Value};
-lookup_i(Label, [_ | Rest]) ->
-	lookup_i(Label, Rest).
-
-%% @private
 
 -ifdef(TEST).
 
@@ -433,7 +420,7 @@ exclude_test_() ->
 	Doc = test_document(),
 	Tests = [
 		{[<<"b">>, <<"c">>, <<"d1">>, <<"d2">>, <<"e">>, <<"f">>, <<"g">>, <<"h">>, <<"i">>, <<"j">>, <<"k1">>, <<"k2">>, <<"l">>, <<"m">>, <<"n">>, <<"o1">>, <<"o2">>, <<"p">>, <<"q1">>, <<"q2">>, <<"r">>, <<"s1">>, <<"s2">>], [{<<"a">>, -4.230845}]},
-		{[], lists:reverse(Doc)}
+		{[], Doc}
 	],
 	[fun() -> Result = exclude(Labels, Doc) end || {Labels, Result} <- Tests].
 
@@ -452,7 +439,7 @@ update_test_() ->
 		{{<<"a">>, 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
 		{{<<"a">>, 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
 		{{[<<"a">>], 1}, [{<<"a">>, 0}], [{<<"a">>, 1}]},
-		{{<<"b">>, 1}, [{<<"a">>, 0}], [{<<"b">>, 1}, {<<"a">>, 0}]}
+		{{<<"b">>, 1}, [{<<"a">>, 0}], [{<<"a">>, 0}, {<<"b">>, 1}]}
 	],
 	[fun() -> Result = update(Key, Value, Doc) end || {{Key, Value}, Doc, Result} <- Tests].
 
