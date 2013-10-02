@@ -26,7 +26,7 @@
 	find_many/4,
 	find_many/3,
 	find_many/2,
-	find/6
+	'query'/6
 ]).
 -export([
 	count/2,
@@ -229,8 +229,10 @@ find_many(Collection, Selector, Projector) ->
 
 find_many(Collection, Selector) ->
 	find_many(Collection, Selector, undefined, 0, infinity, []).
+
+-spec 'query'(collection(), bson:document(), undefined | bson:document(), non_neg_integer(), integer(), find_options()) ->
 		{ok, cursor()} | {error, read_error()}.
-find(Collection, Selector, Projector, Skip, Count, Options) ->
+'query'(Collection, Selector, Projector, Skip, Count, Options) ->
 	#context{
 		connection = Connection,
 		database = Database,
