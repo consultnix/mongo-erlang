@@ -23,6 +23,9 @@
 	find_one/2,
 	find_many/6,
 	find_many/5,
+	find_many/4,
+	find_many/3,
+	find_many/2,
 	find/6
 ]).
 -export([
@@ -180,7 +183,7 @@ find_one(Collection, Selector, Projector) ->
 find_one(Collection, Selector) ->
 	find_one(Collection, Selector, undefined, 0, []).
 
--spec find_many(collection(), bson:document(), undefined | bson:document(), non_neg_integer(), pos_integer(), find_options()) ->
+-spec find_many(collection(), bson:document(), undefined | bson:document(), non_neg_integer(), pos_integer() | infinity, find_options()) ->
 		{ok, [bson:document()]} | {error, read_error()}.
 find_many(Collection, Selector, Projector, Skip, Limit, Options) when is_integer(Limit), Limit > 0 ->
 	#context{
@@ -191,12 +194,41 @@ find_many(Collection, Selector, Projector, Skip, Limit, Options) when is_integer
 	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, -Limit, ReadMode, Options) of
 		{ok, 0, Documents} -> {ok, Documents};
 		Error -> Error
+	end;
+find_many(Collection, Selector, Projector, Skip, infinity, Options) ->
+	#context{
+		connection = Connection,
+		database = Database,
+		read_mode = ReadMode
+	} = erlang:get(mongo_do_context),
+	case mongo_connection:'query'(Connection, Database, Collection, Selector, Projector, Skip, 0, ReadMode, Options) of
+		{ok, Cursor, Documents} ->
+			drain_cursor(Connection, Database, Collection, Cursor, Documents);
+		Error ->
+			Error
+	end.
+
+drain_cursor(_Connection, _Database, _Collection, 0, Acc) ->
+	{ok, Acc};
+drain_cursor(Connection, Database, Collection, Cursor, Acc) ->
+	case mongo_connection:get_more(Connection, Database, Collection, Cursor, 0, []) of
+		{ok, Cursor1, Batch} ->
+			drain_cursor(Connection, Database, Collection, Cursor1, Acc ++ Batch);
+		Error ->
+			Error
 	end.
 
 find_many(Collection, Selector, Projector, Skip, Limit) ->
 	find_many(Collection, Selector, Projector, Skip, Limit, []).
 
--spec find(collection(), bson:document(), undefined | bson:document(), non_neg_integer(), integer(), find_options()) ->
+find_many(Collection, Selector, Projector, Skip) ->
+	find_many(Collection, Selector, Projector, Skip, infinity, []).
+
+find_many(Collection, Selector, Projector) ->
+	find_many(Collection, Selector, Projector, 0, infinity, []).
+
+find_many(Collection, Selector) ->
+	find_many(Collection, Selector, undefined, 0, infinity, []).
 		{ok, cursor()} | {error, read_error()}.
 find(Collection, Selector, Projector, Skip, Count, Options) ->
 	#context{

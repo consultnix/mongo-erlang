@@ -53,7 +53,7 @@ insert_and_find(Config) ->
 			[{<<"name">>, <<"Red Sox">>}, {<<"home">>, [{<<"city">>, <<"Boston">>}, {<<"state">>, <<"MA">>}]}, {<<"league">>, <<"American">>}]
 		]),
 		{ok, 4} = mongo:count(Collection, [{}]),
-		{ok, Teams} = mongo:find_many(Collection, [{}], undefined, 0, 10),
+		{ok, Teams} = mongo:find_many(Collection, [{}]),
 
 		NationalTeams = [Team || Team <- Teams, bson:at(<<"league">>, Team) == <<"National">>],
 		{ok, NationalTeams} = mongo:find_many(Collection, [{<<"league">>, <<"National">>}], undefined, 0, 10),
